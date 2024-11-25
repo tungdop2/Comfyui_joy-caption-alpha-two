@@ -205,12 +205,13 @@ class JoyCaptioner:
         )
         self.image_adapter.eval()
         self.image_adapter.to(self.device)
+        
+        self.transform = T.ToPILImage()
 
     @torch.no_grad()
     def generate(self, input_image, type, tone, length, system_prompt):
-        transform = T.ToPILImage()
         for item in input_image:
-            input_image = transform(item.permute(2, 0, 1))
+            input_image = self.transform(item.permute(2, 0, 1))
             image = input_image.resize((384, 384), Image.LANCZOS)
             pixel_values = TVF.pil_to_tensor(image).unsqueeze(0) / 255.0
             pixel_values = TVF.normalize(pixel_values, [0.5], [0.5])
