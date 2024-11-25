@@ -124,7 +124,7 @@ class JoyCaptioner:
                     {
                         "default": "You are a helpful image captioner, never reject the prompt."
                     },
-                ),
+                )
             }
         }
 
@@ -183,7 +183,7 @@ class JoyCaptioner:
         )
         self.text_model = AutoModelForCausalLM.from_pretrained(
             LLM_PATH,
-            device="auto",
+            device_map="auto",
             torch_dtype=torch.bfloat16,
         )
         self.text_model.load_adapter(os.path.join(CHECKPOINT_PATH, "text_model"))
@@ -200,7 +200,7 @@ class JoyCaptioner:
         )
         self.image_adapter.load_state_dict(
             comfy.utils.load_torch_file(
-                CHECKPOINT_PATH / "image_adapter.pt", safe_load=True, device=self.device
+                os.path.join(CHECKPOINT_PATH, "image_adapter.pt"), safe_load=True, device=self.device
             )
         )
         self.image_adapter.eval()
@@ -216,10 +216,11 @@ class JoyCaptioner:
             pixel_values = TVF.pil_to_tensor(image).unsqueeze(0) / 255.0
             pixel_values = TVF.normalize(pixel_values, [0.5], [0.5])
             pixel_values = pixel_values.to(self.device)
-            vision_outputs = self.clip_model(
-                pixel_values=pixel_values, output_hidden_states=True
-            )
-            embedded_images = self.image_adapter(vision_outputs.hidden_states)
+            with torch.amp.autocast_mode.autocast(self.device.type, enabled=True):
+                vision_outputs = self.clip_model(
+                    pixel_values=pixel_values, output_hidden_states=True
+                )
+                embedded_images = self.image_adapter(vision_outputs.hidden_states).to(self.device)
 
             prompt_str = (
                 f"Write a {length} {type} caption for this image in a {tone} tone."
@@ -237,25 +238,34 @@ class JoyCaptioner:
                 add_special_tokens=False,
                 truncation=False,
             ).squeeze(0)
+            prompt_tokens = self.tokenizer.encode(
+                prompt_str, 
+                return_tensors="pt", 
+                add_special_tokens=False, 
+                truncation=False
+            ).squeeze(0)
 
             eot_id_indices = (
                 (convo_tokens == self.tokenizer.convert_tokens_to_ids("<|eot_id|>"))
                 .nonzero(as_tuple=True)[0]
                 .tolist()
             )
-            preamble_len = eot_id_indices[1] - convo_tokens.shape[0]
+            
+            preamble_len = eot_id_indices[1] - prompt_tokens.shape[0]
 
             convo_embeds = self.text_model.model.embed_tokens(
                 convo_tokens.unsqueeze(0).to(self.device)
             )
+            
             input_embeds = torch.cat(
                 [
                     convo_embeds[:, :preamble_len],
-                    embedded_images,
+                    embedded_images.to(dtype=convo_embeds.dtype),
                     convo_embeds[:, preamble_len:],
                 ],
                 dim=1,
-            )
+            ).to(self.device)
+            
             input_ids = torch.cat(
                 [
                     convo_tokens[:preamble_len].unsqueeze(0),
@@ -274,11 +284,15 @@ class JoyCaptioner:
                 do_sample=True,
                 suppress_tokens=None,
             )
+            
             generate_ids = generate_ids[:, input_ids.shape[1] :]
+            if generate_ids[0][-1] == self.tokenizer.eos_token_id or generate_ids[0][-1] == self.tokenizer.convert_tokens_to_ids("<|eot_id|>"):
+                generate_ids = generate_ids[:, :-1]
+  
             caption = self.tokenizer.batch_decode(
                 generate_ids,
                 skip_special_tokens=True,
                 clean_up_tokenization_spaces=False,
             )[0].strip()
 
-            return (caption[0],)
+            return (caption,)
