@@ -183,7 +183,7 @@ class JoyCaptioner:
         )
         self.text_model = AutoModelForCausalLM.from_pretrained(
             LLM_PATH,
-            device_map="auto",
+            device_map=self.device.type,
             torch_dtype=torch.bfloat16,
         )
         self.text_model.load_adapter(os.path.join(CHECKPOINT_PATH, "text_model"))
