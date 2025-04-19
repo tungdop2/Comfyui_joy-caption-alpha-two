@@ -1,0 +1,15 @@
+[project]
+name = "comfyui_joy-caption-alpha-two"
+description = "The Joy Caption Alpha Two node for ComfyUI, based on https://huggingface.co/spaces/fancyfeast/joy-caption-alpha-two"
+version = "1.0.0"
+license = {file = "LICENSE"}
+dependencies = ["huggingface_hub==0.23.4", "accelerate==1.1.1", "peft==0.13.2", "protobuf"]
+
+[project.urls]
+Repository = "https://github.com/tungdop2/Comfyui_joy-caption-alpha-two"
+#  Used by Comfy Registry https://comfyregistry.org
+
+[tool.comfy]
+PublisherId = ""
+DisplayName = "Comfyui_joy-caption-alpha-two"
+Icon = ""
