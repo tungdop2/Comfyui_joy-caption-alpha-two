@@ -17,11 +17,10 @@ import torchvision.transforms.functional as TVF
 import comfy.model_management as model_management
 import comfy.utils
 import folder_paths
-
+from string import Template
 
 logger = logging.getLogger("JoyCaptionerAlphaTwo")
 logger.setLevel(logging.INFO)
-
 
 # Configuration
 repo_dir = os.path.dirname(os.path.realpath(__file__))
@@ -35,13 +34,13 @@ CHECKPOINT_PATH = os.path.join(ADAPTER_PATH, "cgrkzexw-599808")
 # Define Image Adapter Model
 class ImageAdapter(nn.Module):
     def __init__(
-        self,
-        input_features: int,
-        output_features: int,
-        ln1: bool,
-        pos_emb: bool,
-        num_image_tokens: int,
-        deep_extract: bool,
+            self,
+            input_features: int,
+            output_features: int,
+            ln1: bool,
+            pos_emb: bool,
+            num_image_tokens: int,
+            deep_extract: bool,
     ):
         super().__init__()
         self.deep_extract = deep_extract
@@ -96,15 +95,27 @@ class ImageAdapter(nn.Module):
 
 
 class JoyCaptioner:
+    PROMPT_MAP = {
+        "Description": "write a $length descriptive caption for this image in a $tone tone.",
+        "Training": "write a $length stable diffusion prompt for this image.",
+        "MidJourney": "write a $length midjourney prompt for this image.",
+        "Booru Tags (strict)": "write a $length list of Booru tags for this image.",
+        "Booru-Like Tags": "write a $length list of Booru-like tags for this image.",
+        "Art-Critic": "Analyze this image like an art critic would with information about its composition, style, symbolism, the use of color, light, any artistic movement it might belong to, etc. Keep it $length.",
+        "Product Listing": "Write a $length caption for this image as though it were a product listing.",
+        "Social Media Post": "Write a $length caption for this image as if it were being used for a social media post."
+    }
+
     @classmethod
     def INPUT_TYPES(cls):
         return {
             "required": {
                 "input_image": ("IMAGE", {}),
                 "type": (
-                    ["descriptive", "tagging"],
+                    ["Description", "Training", "MidJourney", "Booru Tags (strict)", "Booru-Like Tags", "Art-Critic",
+                     "Product Listing", "Social Media Post"],
                     {
-                        "default": "descriptive",
+                        "default": "Description",
                     },
                 ),
                 "tone": (
@@ -117,6 +128,12 @@ class JoyCaptioner:
                     ["very short", "short", "medium-length", "long", "very long"],
                     {
                         "default": "medium-length",
+                    },
+                ),
+                "extra_prompt": (
+                    "STRING",
+                    {
+                        "default": "Do NOT mention any text that is in the image."
                     },
                 ),
                 "system_prompt": (
@@ -205,11 +222,11 @@ class JoyCaptioner:
         )
         self.image_adapter.eval()
         self.image_adapter.to(self.device)
-        
+
         self.transform = T.ToPILImage()
 
     @torch.no_grad()
-    def generate(self, input_image, type, tone, length, system_prompt):
+    def generate(self, input_image, type, tone, length, extra_prompt, system_prompt):
         for item in input_image:
             input_image = self.transform(item.permute(2, 0, 1))
             image = input_image.resize((384, 384), Image.LANCZOS)
@@ -222,9 +239,10 @@ class JoyCaptioner:
                 )
                 embedded_images = self.image_adapter(vision_outputs.hidden_states).to(self.device)
 
-            prompt_str = (
-                f"Write a {length} {type} caption for this image in a {tone} tone."
-            )
+            promp_template = self.PROMPT_MAP[type]
+            prompt_str = Template(promp_template).substitute(length=length, tone=tone)
+            prompt_str.join(" " + extra_prompt)
+
             convo = [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": prompt_str},
@@ -239,9 +257,9 @@ class JoyCaptioner:
                 truncation=False,
             ).squeeze(0)
             prompt_tokens = self.tokenizer.encode(
-                prompt_str, 
-                return_tensors="pt", 
-                add_special_tokens=False, 
+                prompt_str,
+                return_tensors="pt",
+                add_special_tokens=False,
                 truncation=False
             ).squeeze(0)
 
@@ -250,13 +268,13 @@ class JoyCaptioner:
                 .nonzero(as_tuple=True)[0]
                 .tolist()
             )
-            
+
             preamble_len = eot_id_indices[1] - prompt_tokens.shape[0]
 
             convo_embeds = self.text_model.model.embed_tokens(
                 convo_tokens.unsqueeze(0).to(self.device)
             )
-            
+
             input_embeds = torch.cat(
                 [
                     convo_embeds[:, :preamble_len],
@@ -265,7 +283,7 @@ class JoyCaptioner:
                 ],
                 dim=1,
             ).to(self.device)
-            
+
             input_ids = torch.cat(
                 [
                     convo_tokens[:preamble_len].unsqueeze(0),
@@ -284,11 +302,12 @@ class JoyCaptioner:
                 do_sample=True,
                 suppress_tokens=None,
             )
-            
-            generate_ids = generate_ids[:, input_ids.shape[1] :]
-            if generate_ids[0][-1] == self.tokenizer.eos_token_id or generate_ids[0][-1] == self.tokenizer.convert_tokens_to_ids("<|eot_id|>"):
+
+            generate_ids = generate_ids[:, input_ids.shape[1]:]
+            if generate_ids[0][-1] == self.tokenizer.eos_token_id or generate_ids[0][
+                -1] == self.tokenizer.convert_tokens_to_ids("<|eot_id|>"):
                 generate_ids = generate_ids[:, :-1]
-  
+
             caption = self.tokenizer.batch_decode(
                 generate_ids,
                 skip_special_tokens=True,
