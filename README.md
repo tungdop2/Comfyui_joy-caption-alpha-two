@@ -5,5 +5,7 @@ This is a set of custom nodes for [ComfyUI](https://github.com/comfyanonymous/Co
 ## Example
 ![example](./examples/example.png)
 
+For the extra_prompt please refer to the  Extra Options at [fancyfeast](https://huggingface.co/fancyfeast) or the README in his [github repo](https://github.com/fpgaminer/joycaption).
+
 ----------------
 Thanks to the [fancyfeast](https://huggingface.co/fancyfeast) for their amazing works.

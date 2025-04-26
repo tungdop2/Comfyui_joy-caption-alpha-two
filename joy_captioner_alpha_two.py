@@ -96,17 +96,15 @@ class ImageAdapter(nn.Module):
 
 class JoyCaptioner:
     PROMPT_MAP = {
-        "descriptive": "write a $lengh descriptive caption for this image in a $tone tone.",
-        "training": "write a $length stable diffusion prompt for this image.",
-        "midjourney": "write a $length midjourney prompt for this image.",
-        "tagging (booru)": "write a $length list of Booru tags for this image.",
-        "tagging (booru-like)": "write a $length list of Booru-like tags for this image.",
-        "art critic": "Analyze this image like an art critic would with information about its composition, style, symbolism, the use of color, light, any artistic movement it might belong to, etc. Keep it $length.",
-        "product listing": "Write a $length caption for this image as though it were a product listing.",
-        "social media post": "Write a $length caption for this image as if it were being used for a social media post."
+        "Description": "write a $length descriptive caption for this image in a $tone tone.",
+        "Training": "write a $length stable diffusion prompt for this image.",
+        "MidJourney": "write a $length midjourney prompt for this image.",
+        "Booru Tags (strict)": "write a $length list of Booru tags for this image.",
+        "Booru-Like Tags": "write a $length list of Booru-like tags for this image.",
+        "Art-Critic": "Analyze this image like an art critic would with information about its composition, style, symbolism, the use of color, light, any artistic movement it might belong to, etc. Keep it $length.",
+        "Product Listing": "Write a $length caption for this image as though it were a product listing.",
+        "Social Media Post": "Write a $length caption for this image as if it were being used for a social media post."
     }
-
-    PROMPT_SUFFIX = "Do NOT mention any text that is in the image. Do NOT use any ambiguous language."
 
     @classmethod
     def INPUT_TYPES(cls):
@@ -114,10 +112,10 @@ class JoyCaptioner:
             "required": {
                 "input_image": ("IMAGE", {}),
                 "type": (
-                    ["descriptive", "training", "midjourney", "tagging (booru)", "tagging (booru-like)", "art critic",
-                     "product listing", "social media post"],
+                    ["Description", "Training", "MidJourney", "Booru Tags (strict)", "Booru-Like Tags", "Art-Critic",
+                     "Product Listing", "Social Media Post"],
                     {
-                        "default": "descriptive",
+                        "default": "Description",
                     },
                 ),
                 "tone": (
@@ -132,6 +130,12 @@ class JoyCaptioner:
                         "default": "medium-length",
                     },
                 ),
+                "extra_prompt": (
+                    "STRING",
+                    {
+                        "default": "Do NOT mention any text that is in the image."
+                    },
+                ),
                 "system_prompt": (
                     "STRING",
                     {
@@ -144,7 +148,7 @@ class JoyCaptioner:
     RETURN_TYPES = ("STRING",)
     RETURN_NAMES = ("caption",)
     FUNCTION = "generate"
-    CATEGORY = "olafth-joy-captioner-alpha-two"
+    CATEGORY = "joy-captioner-alpha-two"
 
     def __init__(self):
         self.device = model_management.get_torch_device()
@@ -222,7 +226,7 @@ class JoyCaptioner:
         self.transform = T.ToPILImage()
 
     @torch.no_grad()
-    def generate(self, input_image, type, tone, length, system_prompt):
+    def generate(self, input_image, type, tone, length, extra_prompt, system_prompt):
         for item in input_image:
             input_image = self.transform(item.permute(2, 0, 1))
             image = input_image.resize((384, 384), Image.LANCZOS)
@@ -235,11 +239,10 @@ class JoyCaptioner:
                 )
                 embedded_images = self.image_adapter(vision_outputs.hidden_states).to(self.device)
 
-            prompt = self.PROMPT_MAP[type]
-            prompt_str = Template(prompt).substitute(length=length, tone=tone)
-            # prompt_str = (
-            #     f"Write a {length} {type} caption for this image in a {tone} tone."
-            # )
+            promp_template = self.PROMPT_MAP[type]
+            prompt_str = Template(promp_template).substitute(length=length, tone=tone)
+            prompt_str.join(" " + extra_prompt)
+
             convo = [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": prompt_str},
